@@ -24,28 +24,29 @@ MODBUS_FUNCTIONS = {
     "Read Input Registers (FC=4)": 4
 }
 
-# Layout for the navigation menu
-app.layout = html.Div([
-    dcc.Location(id='url', refresh=False),
-    html.Div([
-        dcc.Link('Home', href='/'),
-        ' | ',
-        dcc.Link('Modbus RTU', href='/modbus-rtu'),
-        ' | ',
-        dcc.Link('Modbus TCP', href='/modbus-tcp'),
-        ' | ',
-        dcc.Link('CSV Import', href='/csv-import')
-    ]),
-    html.Div(id='page-content')
-])
-
-# Home page layout
+# Define layouts for each page
 home_page = html.Div([
     html.H1("Welcome to the VX Flowmeter App"),
-    html.P("Navigate using the links above to explore different functionalities."),
+    html.P("Navigate using the links on the sidebar to explore different functionalities."),
 ])
 
-# Modbus RTU page layout
+csv_import_page = html.Div([
+    html.H2("CSV File Import"),
+    dcc.Upload(
+        id='upload-data',
+        children=html.Div(['Drag and Drop or ', html.A('Select Files')]),
+        style={
+            'width': '100%', 'height': '60px', 'lineHeight': '60px',
+            'borderWidth': '1px dashed', 'borderRadius': '6px',
+            'textAlign': 'center', 'margin': '10px',
+            'backgroundColor': '#ffffff', 'color': '#0366d6'
+        },
+        multiple=False
+    ),
+    html.Div(id='output-data-upload'),
+    html.Button("Reload Last File", id="reload-btn", n_clicks=0, className="dash-button")
+])
+
 modbus_rtu_page = html.Div([
     html.H2("Modbus RTU Connection"),
     html.Div([
@@ -53,30 +54,32 @@ modbus_rtu_page = html.Div([
         dcc.Dropdown(
             id='com-port',
             options=[{'label': port, 'value': port} for port in COM_PORTS],
-            placeholder="Select COM Port"
+            placeholder="Select COM Port",
+            className="dropdown"
         ),
         html.Label("Baud Rate:"),
         dcc.Dropdown(
             id='baud-rate',
             options=[{'label': rate, 'value': rate} for rate in BAUD_RATES],
-            placeholder="Select Baud Rate"
+            placeholder="Select Baud Rate",
+            className="dropdown"
         ),
         html.Label("Function Code:"),
         dcc.Dropdown(
             id='rtu-function-code',
             options=[{'label': key, 'value': value} for key, value in MODBUS_FUNCTIONS.items()],
-            placeholder='Select Function Code'
+            placeholder='Select Function Code',
+            className="dropdown"
         ),
         html.Label("Starting Point:"),
         dcc.Input(id='rtu-start-point', type='number', placeholder='40000'),
         html.Label("Register Count:"),
         dcc.Input(id='rtu-register-count', type='number', placeholder='10'),
-        html.Button("Read Data", id='read-rtu-btn', n_clicks=0),
+        html.Button("Read Data", id='read-rtu-btn', n_clicks=0, className="dash-button"),
     ]),
     html.Div(id='rtu-output')
 ])
 
-# Modbus TCP page layout
 modbus_tcp_page = html.Div([
     html.H2("Modbus TCP Connection"),
     html.Div([
@@ -88,16 +91,30 @@ modbus_tcp_page = html.Div([
         dcc.Dropdown(
             id='tcp-function-code',
             options=[{'label': key, 'value': value} for key, value in MODBUS_FUNCTIONS.items()],
-            placeholder='Select Function Code'
+            placeholder='Select Function Code',
+            className="dropdown"
         ),
         html.Label("Starting Point:"),
         dcc.Input(id='tcp-start-point', type='number', placeholder='40000'),
         html.Label("Register Count:"),
         dcc.Input(id='tcp-register-count', type='number', placeholder='10'),
-        html.Button("Read Data", id='read-tcp-btn', n_clicks=0),
+        html.Button("Read Data", id='read-tcp-btn', n_clicks=0, className="dash-button"),
     ]),
     html.Div(id='tcp-output')
 ])
+
+# App layout with sidebar and main content
+app.layout = html.Div([
+    dcc.Location(id='url', refresh=False),
+    html.Div([
+        html.H3("Navigation"),
+        html.A('Home', href='/', className='sidebar-link'),
+        html.A('Modbus RTU', href='/modbus-rtu', className='sidebar-link'),
+        html.A('Modbus TCP', href='/modbus-tcp', className='sidebar-link'),
+        html.A('CSV Import', href='/csv-import', className='sidebar-link')
+    ], className='sidebar'),
+    html.Div(id='page-content', className='main-content')
+], className='page-content')
 
 # Callback for routing pages
 @app.callback(
@@ -109,98 +126,54 @@ def display_page(pathname):
         return modbus_rtu_page
     elif pathname == '/modbus-tcp':
         return modbus_tcp_page
+    elif pathname == '/csv-import':
+        return csv_import_page
     else:
         return home_page
 
-# Dynamic starting point update for RTU
+# Callback for storing uploaded data in a file
 @app.callback(
-    Output('rtu-start-point', 'value'),
-    Input('rtu-function-code', 'value')
+    Output('output-data-upload', 'children'),
+    [Input('upload-data', 'contents'),
+     Input('upload-data', 'filename'),
+     Input('reload-btn', 'n_clicks')]
 )
-def update_rtu_starting_point(function_code):
-    if function_code == 3:  # Holding Registers
-        return 40000
-    elif function_code == 4:  # Input Registers
-        return 30000
-    elif function_code == 1:  # Coils
-        return 1
-    elif function_code == 2:  # Discrete Inputs
-        return 10000
-    return 0
+def save_and_display_file(contents, filename, reload_clicks):
+    last_file_path = os.path.join(UPLOAD_FOLDER, "last_uploaded_file.csv")
+    ctx = callback_context
 
-# Dynamic starting point update for TCP
-@app.callback(
-    Output('tcp-start-point', 'value'),
-    Input('tcp-function-code', 'value')
-)
-def update_tcp_starting_point(function_code):
-    if function_code == 3:  # Holding Registers
-        return 40000
-    elif function_code == 4:  # Input Registers
-        return 30000
-    elif function_code == 1:  # Coils
-        return 1
-    elif function_code == 2:  # Discrete Inputs
-        return 10000
-    return 0
+    # Reload the last file if the button is clicked
+    if ctx.triggered and "reload-btn" in ctx.triggered[0]["prop_id"]:
+        if os.path.exists(last_file_path):
+            df = pd.read_csv(last_file_path)
+            return html.Div([
+                html.H5("Reloaded Last File:"),
+                html.Pre(df.head().to_string(), style={'whiteSpace': 'pre-wrap', 'wordBreak': 'break-word'})
+            ])
+        else:
+            return html.Div(["No previous file to reload."])
 
-# Callback for Modbus RTU data
-@app.callback(
-    Output('rtu-output', 'children'),
-    Input('read-rtu-btn', 'n_clicks'),
-    State('com-port', 'value'),
-    State('baud-rate', 'value'),
-    State('rtu-function-code', 'value'),
-    State('rtu-start-point', 'value'),
-    State('rtu-register-count', 'value')
-)
-def read_rtu_data(n_clicks, port, baudrate, function_code, start_point, count):
-    if n_clicks > 0:
+    # Handle new file upload
+    if contents is not None:
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
         try:
-            client = ModbusSerialClient(method='rtu', port=port, baudrate=baudrate)
-            if client.connect():
-                if function_code == 3:
-                    result = client.read_holding_registers(start_point - 40001, count)
-                elif function_code == 4:
-                    result = client.read_input_registers(start_point - 30001, count)
-                else:
-                    return "Function code not supported for RTU."
-                client.close()
-                if result.isError():
-                    return f"Error: {result}"
-                return f"Data: {result.registers}"
-            return "Unable to connect to RTU device."
+            if 'csv' in filename:
+                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                df.to_csv(last_file_path, index=False)  # Save the file
+            elif 'xls' in filename:
+                df = pd.read_excel(io.BytesIO(decoded))
+                df.to_csv(last_file_path, index=False)  # Save as CSV for consistency
+            else:
+                return html.Div(['Unsupported file format.'])
         except Exception as e:
-            return f"Error: {e}"
+            return html.Div([f"Error processing file: {e}"])
+        return html.Div([
+            html.H5(f"Uploaded File: {filename}"),
+            html.Pre(df.head().to_string(), style={'whiteSpace': 'pre-wrap', 'wordBreak': 'break-word'})
+        ])
 
-# Callback for Modbus TCP data
-@app.callback(
-    Output('tcp-output', 'children'),
-    Input('read-tcp-btn', 'n_clicks'),
-    State('tcp-host', 'value'),
-    State('tcp-port', 'value'),
-    State('tcp-function-code', 'value'),
-    State('tcp-start-point', 'value'),
-    State('tcp-register-count', 'value')
-)
-def read_tcp_data(n_clicks, host, port, function_code, start_point, count):
-    if n_clicks > 0:
-        try:
-            client = ModbusTcpClient(host, port=port)
-            if client.connect():
-                if function_code == 3:
-                    result = client.read_holding_registers(start_point - 40001, count)
-                elif function_code == 4:
-                    result = client.read_input_registers(start_point - 30001, count)
-                else:
-                    return "Function code not supported for TCP."
-                client.close()
-                if result.isError():
-                    return f"Error: {result}"
-                return f"Data: {result.registers}"
-            return "Unable to connect to TCP device."
-        except Exception as e:
-            return f"Error: {e}"
+    return html.Div(['No file uploaded.'])
 
 # Run the app
 if __name__ == '__main__':
